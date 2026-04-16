@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
+  <title>Scrabble</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Crimson+Text:wght@400;600&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+    body{background:#0c180a;color:#d8cc80;font-family:'Crimson Text',serif;min-height:100vh;}
+    input,button{font-family:inherit;}
+    .tile{width:42px;height:42px;border-radius:7px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;user-select:none;font-family:'Playfair Display',serif;font-weight:700;font-size:20px;transition:transform 0.1s;}
+    .tile-val{position:absolute;bottom:1px;right:2px;font-size:9px;font-weight:700;}
+    .cell{aspect-ratio:1;border-radius:2px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;min-width:0;}
+    .cell-letter{font-family:'Playfair Display',serif;font-weight:700;font-size:clamp(7px,2vw,12px);color:#301800;line-height:1;}
+    .cell-val{position:absolute;bottom:1px;right:1px;font-size:clamp(4px,0.9vw,7px);color:#604000;font-weight:700;}
+    .cell-bonus{font-size:clamp(4px,1.1vw,7px);font-weight:700;color:#fff;line-height:1;text-align:center;}
+    .btn-p{width:100%;padding:12px 0;border-radius:10px;background:linear-gradient(135deg,#3a6830,#234820);border:none;color:#d8cc80;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:8px;letter-spacing:.5px;font-family:'Playfair Display',serif;}
+    .btn-s{width:100%;padding:12px 0;border-radius:10px;background:#142812;border:1px solid #304e28;color:#d8cc80;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:8px;font-family:'Playfair Display',serif;}
+    .inp{width:100%;padding:10px 12px;border-radius:8px;background:#0c1c0a;border:1px solid #304e28;color:#d8cc80;font-size:16px;outline:none;margin-bottom:8px;display:block;}
+    .divider{height:1px;background:#284822;margin:12px 0;}
+    .sec{font-size:13px;font-weight:700;color:#98b858;margin-bottom:8px;font-family:'Playfair Display',serif;}
+    .modal-overlay{position:fixed;inset:0;background:#000c;display:flex;align-items:center;justify-content:center;z-index:99;}
+    .modal-box{background:#142812;border:1px solid #284822;border-radius:14px;padding:20px;width:260px;}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const FB="https://scrabble-479cc-default-rtdb.firebaseio.com";
+const fbGet=(p)=>fetch(`${FB}/${p}.json`).then(r=>r.json());
+const fbSet=(p,d)=>fetch(`${FB}/${p}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});
+const fbPatch=(p,d)=>fetch(`${FB}/${p}.json`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});
+
+const VALS={A:1,Ä:6,B:3,C:4,D:1,E:1,F:4,G:2,H:2,I:1,J:6,K:4,L:2,M:3,N:1,O:2,Ö:8,P:4,Q:10,R:1,S:1,T:1,U:1,Ü:6,V:6,W:3,X:8,Y:10,Z:3,"*":0};
+const DIST={A:5,Ä:1,B:2,C:2,D:4,E:15,F:2,G:3,H:4,I:6,J:1,K:2,L:3,M:4,N:9,O:3,Ö:1,P:1,Q:1,R:6,S:7,T:6,U:6,Ü:1,V:1,W:1,X:1,Y:1,Z:3,"*":2};
+const BM={};
+[[0,0],[0,7],[0,14],[7,0],[7,14],[14,0],[14,7],[14,14]].forEach(([r,c])=>BM[`${r},${c}`]="TW");
+[[1,1],[2,2],[3,3],[4,4],[10,10],[11,11],[12,12],[13,13],[1,13],[2,12],[3,11],[4,10],[10,4],[11,3],[12,2],[13,1]].forEach(([r,c])=>BM[`${r},${c}`]="DW");
+[[1,5],[1,9],[5,1],[5,5],[5,9],[5,13],[9,1],[9,5],[9,9],[9,13],[13,5],[13,9]].forEach(([r,c])=>BM[`${r},${c}`]="TL");
+[[0,3],[0,11],[2,6],[2,8],[3,0],[3,7],[3,14],[6,2],[6,6],[6,8],[6,12],[7,3],[7,11],[8,2],[8,6],[8,8],[8,12],[11,0],[11,7],[11,14],[12,6],[12,8],[14,3],[14,11]].forEach(([r,c])=>BM[`${r},${c}`]="DL");
+BM["7,7"]="ST";
+const BC={TW:{bg:"#9a2222",lb:"3W"},DW:{bg:"#c03838",lb:"2W"},TL:{bg:"#183e78",lb:"3B"},DL:{bg:"#1e5898",lb:"2B"},ST:{bg:"#8a5808",lb:"★"}};
+
+function makeBag(){const b=[];for(const[l,n]of Object.entries(DIST))for(let i=0;i<n;i++)b.push(l);for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
+function fillRack(rack,bag){const r=[...rack],b=[...bag];while(r.length<7&&b.length>0)r.push(b.pop());return{rack:r,bag:b};}
+function boardToFb(board){const o={};board.forEach((row,r)=>row.forEach((v,c)=>{if(v)o[`${r}_${c}`]=v;}));return o;}
+function fbToBoard(fb){const b=Array.from({length:15},()=>Array(15).fill(""));if(fb)Object.entries(fb).forEach(([k,v])=>{const[r,c]=k.split("_").map(Number);b[r][c]=v;});return b;}
+function getWords(board,tiles){const tmp=board.map(r=>[...r]);tiles.forEach(t=>{tmp[t.r][t.c]=t.l;});const ns=new Set(tiles.map(t=>`${t.r},${t.c}`));const words=[];for(let r=0;r<15;r++)for(let c=0;c<15;c++){if((c===0||!tmp[r][c-1])&&tmp[r][c]){let w="",cc=c,cs=[];while(cc<15&&tmp[r][cc]){w+=tmp[r][cc];cs.push([r,cc]);cc++;}if(w.length>=2&&cs.some(([rr,cc2])=>ns.has(`${rr},${cc2}`)))words.push({w,cs});}if((r===0||!tmp[r-1][c])&&tmp[r][c]){let w="",rr=r,cs=[];while(rr<15&&tmp[rr][c]){w+=tmp[rr][c];cs.push([rr,c]);rr++;}if(w.length>=2&&cs.some(([rr2,cc])=>ns.has(`${rr2},${cc}`)))words.push({w,cs});}}return words;}
+function calcScore(board,tiles){const tmp=board.map(r=>[...r]);const ns=new Set(tiles.map(t=>`${t.r},${t.c}`));tiles.forEach(t=>{tmp[t.r][t.c]=t.l;});let tot=0;for(const{cs}of getWords(board,tiles)){let ws=0,wm=1;for(const[r,c]of cs){const v=VALS[tmp[r][c]]??0,bn=ns.has(`${r},${c}`)?BM[`${r},${c}`]:"";ws+=bn==="TL"?v*3:bn==="DL"?v*2:v;if(bn==="TW")wm*=3;else if(bn==="DW"||bn==="ST")wm*=2;}tot+=ws*wm;}if(tiles.length===7)tot+=50;return tot;}
+
+async function checkWord(w){
+  try{const r=await fetch("/api/check-word",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({word:w})});const d=await r.json();return d.valid;}
+  catch{return true;}
+}
+
+const S={screen:"home",slot:"",code:"",game:null,sel:-1,placed:[],msg:"",busy:false,blank:null,blankL:"",nameInput:"",codeInput:"",pollIv:null,lastTs:0};
+
+function startPolling(){
+  if(S.pollIv)clearInterval(S.pollIv);
+  S.pollIv=setInterval(async()=>{
+    if(!S.code)return;
+    const d=await fbGet(`games/${S.code}`);
+    if(!d)return;
+    if((d.ts||0)>S.lastTs){S.lastTs=d.ts;S.game={...d,board:fbToBoard(d.boardFb)};render();}
+  },1500);
+}
+async function saveGame(g){
+  await fbSet(`games/${S.code}`,{...g,boardFb:boardToFb(g.board),board:null});
+  S.game=g;S.lastTs=g.ts;render();
+}
+
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+
+window._create=async function(){
+  const name=S.nameInput.trim();
+  if(!name){S.msg="Name eingeben!";render();return;}
+  const code=Math.random().toString(36).slice(2,7).toUpperCase();
+  let bag=makeBag(),r1,r2;({rack:r1,bag}=fillRack([],bag));({rack:r2,bag}=fillRack([],bag));
+  const g={boardFb:{},bag,p1:{name,rack:r1,score:0},p2:{name:"",rack:r2,score:0},turn:"p1",log:[],joined:false,ts:Date.now()};
+  await fbSet(`games/${code}`,g);
+  S.code=code;S.slot="p1";S.game={...g,board:fbToBoard({})};S.lastTs=g.ts;S.screen="game";S.msg="";
+  startPolling();render();
+};
+window._join=async function(){
+  const name=S.nameInput.trim(),code=S.codeInput.trim().toUpperCase();
+  if(!name||!code){S.msg="Name und Code eingeben!";render();return;}
+  const d=await fbGet(`games/${code}`);
+  if(!d){S.msg="Raum nicht gefunden!";render();return;}
+  if(d.joined){S.msg="Raum ist voll!";render();return;}
+  await fbPatch(`games/${code}`,{joined:true,p2:{...d.p2,name},ts:Date.now()});
+  const u=await fbGet(`games/${code}`);
+  S.code=code;S.slot="p2";S.game={...u,board:fbToBoard(u.boardFb)};S.lastTs=u.ts;S.screen="game";S.msg="";
+  startPolling();render();
+};
+window._tapTile=function(i){
+  if(S.placed.some(p=>p.idx===i))return;
+  S.sel=S.sel===i?-1:i;S.msg="";render();
+};
+window._tapCell=function(r,c){
+  if(S.game.turn!==S.slot){S.msg="Nicht dein Zug!";render();return;}
+  if(S.placed.find(p=>p.r===r&&p.c===c)){S.placed=S.placed.filter(p=>!(p.r===r&&p.c===c));render();return;}
+  if(S.game.board[r][c])return;
+  if(S.sel===-1){S.msg="Erst Buchstaben antippen!";render();return;}
+  const letter=S.game[S.slot].rack[S.sel];
+  if(letter==="*"){S.blank={r,c,idx:S.sel};S.blankL="";S.sel=-1;render();return;}
+  S.placed=[...S.placed,{r,c,l:letter,idx:S.sel}];S.sel=-1;S.msg="";render();
+};
+window._recall=function(){S.placed=[];S.sel=-1;S.msg="";render();};
+window._skip=async function(){
+  if(S.game.turn!==S.slot){S.msg="Nicht dein Zug!";render();return;}
+  const other=S.slot==="p1"?"p2":"p1";
+  await saveGame({...S.game,turn:other,log:[...S.game.log,`${S.game[S.slot].name}: ausgesetzt`],ts:Date.now()});
+  S.placed=[];S.sel=-1;S.msg="Ausgesetzt.";render();
+};
+window._submit=async function(){
+  if(S.game.turn!==S.slot){S.msg="Nicht dein Zug!";render();return;}
+  if(!S.placed.length){S.msg="Keine Buchstaben gelegt!";render();return;}
+  S.busy=true;S.msg="Prüfe Wörter…";render();
+  const empty=S.game.board.every(row=>row.every(c=>!c));
+  if(empty&&!S.placed.some(p=>p.r===7&&p.c===7)){S.msg="Erster Zug muss ★ bedecken!";S.busy=false;render();return;}
+  const rs=new Set(S.placed.map(p=>p.r)),cs=new Set(S.placed.map(p=>p.c));
+  if(rs.size>1&&cs.size>1){S.msg="Buchstaben in einer Linie!";S.busy=false;render();return;}
+  const words=getWords(S.game.board,S.placed);
+  if(!words.length){S.msg="Keine Wörter gebildet!";S.busy=false;render();return;}
+  for(const{w}of words){if(!await checkWord(w)){S.msg=`"${w}" kein deutsches Wort ✗`;S.busy=false;render();return;}}
+  const pts=calcScore(S.game.board,S.placed);
+  const nb=S.game.board.map(r=>[...r]);
+  S.placed.forEach(({r,c,l})=>{nb[r][c]=l;});
+  const ui=new Set(S.placed.map(p=>p.idx));
+  const me=S.game[S.slot];
+  const{rack:filled,bag:newBag}=fillRack(me.rack.filter((_,i)=>!ui.has(i)),S.game.bag);
+  const other=S.slot==="p1"?"p2":"p1";
+  await saveGame({...S.game,board:nb,bag:newBag,[S.slot]:{...me,rack:filled,score:me.score+pts},turn:other,log:[...S.game.log,`${me.name}: ${words.map(w=>w.w).join(", ")} (+${pts})`],ts:Date.now()});
+  S.placed=[];S.sel=-1;S.busy=false;S.msg=`✓ ${words.map(w=>w.w).join(", ")} — +${pts} Punkte!`;render();
+};
+window._confirmBlank=function(){
+  if(!S.blankL||!S.blank)return;
+  S.placed=[...S.placed,{r:S.blank.r,c:S.blank.c,l:S.blankL.toUpperCase(),idx:S.blank.idx}];
+  S.blank=null;S.blankL="";S.msg="";render();
+};
+window._cancelBlank=function(){S.blank=null;S.blankL="";render();};
+
+function renderHome(){
+  document.getElementById("app").innerHTML=`
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;padding-bottom:40px;">
+    <div style="text-align:center;padding:30px 0 8px;">
+      <div style="font-family:'Playfair Display',serif;font-size:34px;font-weight:900;letter-spacing:6px;color:#e8d070;">SCRABBLE</div>
+      <div style="font-size:11px;color:#5a7a28;letter-spacing:2px;margin-top:2px;">DEUTSCHES WORTSPIEL</div>
+    </div>
+    <div style="background:#142812;border:1px solid #284822;border-radius:14px;padding:20px 18px;width:calc(100% - 32px);max-width:370px;margin:0 auto;">
+      <div style="font-size:12px;color:#608030;margin-bottom:6px;">Dein Name:</div>
+      <input class="inp" id="nameInp" placeholder="Name…" value="${esc(S.nameInput)}" oninput="S.nameInput=this.value"/>
+      <div class="divider"></div>
+      <div class="sec">Neues Spiel erstellen</div>
+      <button class="btn-p" onclick="_create()">Spiel erstellen →</button>
+      <div class="divider"></div>
+      <div class="sec">Spiel beitreten</div>
+      <input class="inp" id="codeInp" placeholder="Code (5 Zeichen)…" maxlength="5" value="${esc(S.codeInput)}" oninput="S.codeInput=this.value.toUpperCase()"/>
+      ${S.msg?`<div style="color:#c04040;font-size:12px;margin-bottom:6px;">${esc(S.msg)}</div>`:""}
+      <button class="btn-s" onclick="_join()">Beitreten →</button>
+    </div>
+  </div>`;
+}
+
+function renderGame(){
+  const{slot,game,sel,placed,msg,busy,blank,blankL}=S;
+  if(!game){document.getElementById("app").innerHTML=`<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#608030;font-size:18px;">Verbinde…</div>`;return;}
+  const me=game[slot],them=game[slot==="p1"?"p2":"p1"];
+  const myTurn=game.turn===slot;
+  const usedIdx=new Set(placed.map(p=>p.idx));
+  const pMap={};placed.forEach(p=>{pMap[`${p.r},${p.c}`]=p.l;});
+
+  let boardCells="";
+  for(let r=0;r<15;r++){
+    for(let c=0;c<15;c++){
+      const pl=pMap[`${r},${c}`],bl=game.board[r][c],letter=pl||bl;
+      const bon=!letter?BM[`${r},${c}`]:"",bui=bon?BC[bon]:null;
+      let bg=bui?bui.bg:(sel>=0&&myTurn?"#243f20":"#1c3818");
+      let border="1px solid #14280f",shadow="";
+      if(letter){bg="linear-gradient(145deg,#f0dc9c,#d4aa58)";border=pl?"2px solid #d0980c":"1px solid #a07020";shadow=pl?"box-shadow:0 0 4px #d0980caa;":"";}
+      let inner="";
+      if(letter)inner=`<span class="cell-letter">${esc(letter)}</span><span class="cell-val">${VALS[letter]??0}</span>`;
+      else if(bui)inner=`<span class="cell-bonus">${bui.lb}</span>`;
+      boardCells+=`<div class="cell" style="background:${bg};border:${border};${shadow}" onclick="_tapCell(${r},${c})">${inner}</div>`;
+    }
+  }
+
+  let rackTiles="";
+  me.rack.forEach((letter,i)=>{
+    const isUsed=usedIdx.has(i),isSel=sel===i;
+    const bg=isUsed?"#182018":isSel?"linear-gradient(145deg,#eebc18,#b87c08)":"linear-gradient(145deg,#f0dc9c,#d4aa58)";
+    const border=isSel?"2.5px solid #9a6c04":isUsed?"1px solid #283020":"2px solid #9a7020";
+    const color=isUsed?"#385030":"#301800";
+    const transform=isSel?"translateY(-6px) scale(1.18)":"none";
+    const shadow=isSel?"box-shadow:0 6px 16px #b87c0880;":isUsed?"":"box-shadow:0 2px 5px #0003;";
+    const valColor=isUsed?"#385030":"#604000";
+    rackTiles+=`<div class="tile" style="background:${bg};border:${border};color:${color};transform:${transform};${shadow}" onclick="_tapTile(${i})">${esc(letter)}<span class="tile-val" style="color:${valColor};">${VALS[letter]??0}</span></div>`;
+  });
+
+  let logHtml="";
+  if(game.log?.length){
+    const entries=game.log.slice(-4).reverse().map(e=>`<div style="font-size:12px;color:#488038;padding:1px 0;">${esc(e)}</div>`).join("");
+    logHtml=`<div style="margin:8px 12px 0;padding:6px 10px;border-radius:8px;background:#080e06;border:1px solid #142010;max-width:456px;width:calc(100% - 24px);"><div style="font-size:9px;color:#508028;letter-spacing:1.5px;margin-bottom:3px;">SPIELVERLAUF</div>${entries}</div>`;
+  }
+
+  let blankHtml="";
+  if(blank){
+    blankHtml=`<div class="modal-overlay"><div class="modal-box">
+      <div style="font-family:'Playfair Display',serif;font-size:17px;color:#e8d070;margin-bottom:10px;">Blankostein – welcher Buchstabe?</div>
+      <input class="inp" placeholder="z.B. E" maxlength="1" value="${esc(blankL)}" oninput="S.blankL=this.value.toUpperCase()" autofocus/>
+      <button class="btn-p" onclick="_confirmBlank()">Bestätigen</button>
+      <button class="btn-s" onclick="_cancelBlank()">Abbrechen</button>
+    </div></div>`;
+  }
+
+  const msgColor=msg.startsWith("✓")?"#58b030":"#c03030";
+  const msgBg=msg.startsWith("✓")?"#0e1e0c":"#1e0c0c";
+  const msgBdr=msg.startsWith("✓")?"#285820":"#582020";
+  const submitBg=busy?"#182018":"linear-gradient(135deg,#386430,#234820)";
+  const rackHint=sel>=0?`"${esc(me.rack[sel])}" → Feld antippen`:"DEINE BUCHSTABEN — antippen";
+  const p1=game.p1,p2=game.p2;
+  const isP1Me=slot==="p1";
+
+  document.getElementById("app").innerHTML=`
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;padding-bottom:40px;">
+    <div style="width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;box-sizing:border-box;border-bottom:1px solid #1c3018;">
+      <div>
+        <span style="font-family:'Playfair Display',serif;font-size:17px;font-weight:900;color:#e8d070;letter-spacing:3px;">SCRABBLE</span>
+        <span style="font-size:10px;color:#508028;margin-left:8px;">#${esc(S.code)}</span>
+      </div>
+      <div>${myTurn
+        ?`<span style="color:#d8a020;font-weight:700;font-family:'Playfair Display',serif;font-size:13px;">✦ DEIN ZUG</span>`
+        :`<span style="color:#508028;font-size:12px;">${esc(them?.name||"Gegner")} ist dran…</span>`}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;padding:6px 12px;width:100%;max-width:480px;box-sizing:border-box;">
+      <div style="flex:1;background:${isP1Me?"#142812":"#0c1608"};border:${isP1Me?"1px solid #285820":"1px solid #182010"};border-radius:10px;padding:5px 8px;text-align:center;">
+        <div style="font-size:9px;color:#508028;">${isP1Me?"Du":"Gegner"}</div>
+        <div style="font-family:'Playfair Display',serif;font-size:11px;color:#88a058;">${esc(p1?.name||"…")}</div>
+        <div style="font-family:'Playfair Display',serif;font-size:24px;font-weight:900;color:#e8d070;">${p1?.score||0}</div>
+      </div>
+      <div style="flex:1;background:${!isP1Me?"#142812":"#0c1608"};border:${!isP1Me?"1px solid #285820":"1px solid #182010"};border-radius:10px;padding:5px 8px;text-align:center;">
+        <div style="font-size:9px;color:#508028;">${!isP1Me?"Du":"Gegner"}</div>
+        <div style="font-family:'Playfair Display',serif;font-size:11px;color:#88a058;">${esc(p2?.name||"…")}</div>
+        <div style="font-family:'Playfair Display',serif;font-size:24px;font-weight:900;color:#e8d070;">${p2?.score||0}</div>
+      </div>
+    </div>
+
+    <div style="width:calc(100vw - 10px);max-width:474px;display:grid;grid-template-columns:repeat(15,1fr);gap:1.5px;padding:0 5px;box-sizing:border-box;">${boardCells}</div>
+
+    ${msg?`<div style="margin:5px 12px;padding:6px 14px;border-radius:8px;background:${msgBg};border:1px solid ${msgBdr};color:${msgColor};font-size:13px;text-align:center;width:calc(100% - 24px);max-width:456px;">${esc(msg)}</div>`:""}
+
+    <div style="font-size:10px;color:#508028;letter-spacing:1px;margin-top:8px;text-align:center;">${rackHint}</div>
+
+    <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;padding:6px 12px 4px;width:100%;max-width:480px;box-sizing:border-box;">${rackTiles}</div>
+
+    <div style="display:flex;gap:6px;padding:4px 12px;width:100%;max-width:480px;box-sizing:border-box;">
+      <button style="flex:2;padding:11px 0;border-radius:10px;background:${submitBg};border:none;color:#d8cc80;font-size:14px;font-weight:700;font-family:'Playfair Display',serif;cursor:${busy?"default":"pointer"};" onclick="_submit()">${busy?"Prüfe…":"✓ Bestätigen"}</button>
+      <button style="flex:1;padding:11px 0;border-radius:10px;background:#142812;border:1px solid #284822;color:#d8cc80;font-size:13px;cursor:pointer;font-family:'Playfair Display',serif;" onclick="_recall()">↩ Reset</button>
+      <button style="flex:1;padding:11px 0;border-radius:10px;background:#142812;border:1px solid #284822;color:#608030;font-size:13px;cursor:pointer;font-family:'Playfair Display',serif;" onclick="_skip()">⏭ Aussetzen</button>
+    </div>
+
+    ${logHtml}
+    ${blankHtml}
+  </div>`;
+}
+
+function render(){
+  if(S.screen==="game") renderGame();
+  else renderHome();
+}
+
+render();
+</script>
+</body>
+</html>
