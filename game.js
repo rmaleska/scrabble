@@ -1,5 +1,6 @@
-// Vercel KV - kostenloses Storage direkt in Vercel
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
+
+const redis = Redis.fromEnv();
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,20 +11,23 @@ export default async function handler(req, res) {
   const { code, action, data } = req.body || {};
   const qcode = req.query.code;
 
-  if (req.method === 'GET') {
-    const game = await kv.get(`game:${qcode}`);
-    return res.json(game || null);
-  }
-
-  if (req.method === 'POST') {
-    if (action === 'set') {
-      await kv.set(`game:${code}`, data, { ex: 86400 }); // 24h TTL
-      return res.json({ ok: true });
-    }
-    if (action === 'get') {
-      const game = await kv.get(`game:${code}`);
+  try {
+    if (req.method === 'GET') {
+      const game = await redis.get(`game:${qcode}`);
       return res.json(game || null);
     }
+    if (req.method === 'POST') {
+      if (action === 'get') {
+        const game = await redis.get(`game:${code}`);
+        return res.json(game || null);
+      }
+      if (action === 'set') {
+        await redis.set(`game:${code}`, data, { ex: 86400 });
+        return res.json({ ok: true });
+      }
+    }
+  } catch(e) {
+    return res.status(500).json({ error: e.message });
   }
 
   res.status(400).json({ error: 'Invalid request' });
