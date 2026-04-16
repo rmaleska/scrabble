@@ -27,10 +27,9 @@
 <body>
 <div id="app"></div>
 <script>
-const FB="https://scrabble-479cc-default-rtdb.firebaseio.com";
-const fbGet=(p)=>fetch(`${FB}/${p}.json`).then(r=>r.json());
-const fbSet=(p,d)=>fetch(`${FB}/${p}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});
-const fbPatch=(p,d)=>fetch(`${FB}/${p}.json`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});
+const fbGet=(code)=>fetch(`/api/game?code=${code}`).then(r=>r.json());
+const fbSet=(code,data)=>fetch('/api/game',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'set',code,data})});
+const fbPatch=async(code,patch)=>{const cur=await fbGet(code);return fbSet(code,{...cur,...patch});}
 
 const VALS={A:1,Ä:6,B:3,C:4,D:1,E:1,F:4,G:2,H:2,I:1,J:6,K:4,L:2,M:3,N:1,O:2,Ö:8,P:4,Q:10,R:1,S:1,T:1,U:1,Ü:6,V:6,W:3,X:8,Y:10,Z:3,"*":0};
 const DIST={A:5,Ä:1,B:2,C:2,D:4,E:15,F:2,G:3,H:4,I:6,J:1,K:2,L:3,M:4,N:9,O:3,Ö:1,P:1,Q:1,R:6,S:7,T:6,U:6,Ü:1,V:1,W:1,X:1,Y:1,Z:3,"*":2};
@@ -57,13 +56,13 @@ function startPolling(){
   if(S.pollIv)clearInterval(S.pollIv);
   S.pollIv=setInterval(async()=>{
     if(!S.code)return;
-    const d=await fbGet(`games/${S.code}`);
+    const d=await fbGet(S.code);
     if(!d)return;
     if((d.ts||0)>S.lastTs){S.lastTs=d.ts;S.game={...d,board:fbToBoard(d.boardFb)};render();}
   },1500);
 }
 async function saveGame(g){
-  await fbSet(`games/${S.code}`,{...g,boardFb:boardToFb(g.board),board:null});
+  await fbSet(S.code,{...g,boardFb:boardToFb(g.board),board:null});
   S.game=g;S.lastTs=g.ts;render();
 }
 
@@ -75,18 +74,18 @@ window._create=async function(){
   const code=Math.random().toString(36).slice(2,7).toUpperCase();
   let bag=makeBag(),r1,r2;({rack:r1,bag}=fillRack([],bag));({rack:r2,bag}=fillRack([],bag));
   const g={boardFb:{},bag,p1:{name,rack:r1,score:0},p2:{name:"",rack:r2,score:0},turn:"p1",log:[],joined:false,ts:Date.now()};
-  await fbSet(`games/${code}`,g);
+  await fbSet(code,g);
   S.code=code;S.slot="p1";S.game={...g,board:fbToBoard({})};S.lastTs=g.ts;S.screen="game";S.msg="";
   startPolling();render();
 };
 window._join=async function(){
   const name=S.nameInput.trim(),code=S.codeInput.trim().toUpperCase();
   if(!name||!code){S.msg="Name und Code eingeben!";render();return;}
-  const d=await fbGet(`games/${code}`);
+  const d=await fbGet(code);
   if(!d){S.msg="Raum nicht gefunden!";render();return;}
   if(d.joined){S.msg="Raum ist voll!";render();return;}
-  await fbPatch(`games/${code}`,{joined:true,p2:{...d.p2,name},ts:Date.now()});
-  const u=await fbGet(`games/${code}`);
+  await fbPatch(code,{joined:true,p2:{...d.p2,name},ts:Date.now()});
+  const u=await fbGet(code);
   S.code=code;S.slot="p2";S.game={...u,board:fbToBoard(u.boardFb)};S.lastTs=u.ts;S.screen="game";S.msg="";
   startPolling();render();
 };
