@@ -49,10 +49,7 @@ function fbToBoard(fb){const b=Array.from({length:15},()=>Array(15).fill(""));if
 function getWords(board,tiles){const tmp=board.map(r=>[...r]);tiles.forEach(t=>{tmp[t.r][t.c]=t.l;});const ns=new Set(tiles.map(t=>`${t.r},${t.c}`));const words=[];for(let r=0;r<15;r++)for(let c=0;c<15;c++){if((c===0||!tmp[r][c-1])&&tmp[r][c]){let w="",cc=c,cs=[];while(cc<15&&tmp[r][cc]){w+=tmp[r][cc];cs.push([r,cc]);cc++;}if(w.length>=2&&cs.some(([rr,cc2])=>ns.has(`${rr},${cc2}`)))words.push({w,cs});}if((r===0||!tmp[r-1][c])&&tmp[r][c]){let w="",rr=r,cs=[];while(rr<15&&tmp[rr][c]){w+=tmp[rr][c];cs.push([rr,c]);rr++;}if(w.length>=2&&cs.some(([rr2,cc])=>ns.has(`${rr2},${cc}`)))words.push({w,cs});}}return words;}
 function calcScore(board,tiles){const tmp=board.map(r=>[...r]);const ns=new Set(tiles.map(t=>`${t.r},${t.c}`));tiles.forEach(t=>{tmp[t.r][t.c]=t.l;});let tot=0;for(const{cs}of getWords(board,tiles)){let ws=0,wm=1;for(const[r,c]of cs){const v=VALS[tmp[r][c]]??0,bn=ns.has(`${r},${c}`)?BM[`${r},${c}`]:"";ws+=bn==="TL"?v*3:bn==="DL"?v*2:v;if(bn==="TW")wm*=3;else if(bn==="DW"||bn==="ST")wm*=2;}tot+=ws*wm;}if(tiles.length===7)tot+=50;return tot;}
 
-async function checkWord(w){
-  try{const r=await fetch("/api/check-word",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({word:w})});const d=await r.json();return d.valid;}
-  catch{return true;}
-}
+function checkWord(w){return Promise.resolve(true);}
 
 const S={screen:"home",slot:"",code:"",game:null,sel:-1,placed:[],msg:"",busy:false,blank:null,blankL:"",nameInput:"",codeInput:"",pollIv:null,lastTs:0};
 
@@ -116,14 +113,12 @@ window._skip=async function(){
 window._submit=async function(){
   if(S.game.turn!==S.slot){S.msg="Nicht dein Zug!";render();return;}
   if(!S.placed.length){S.msg="Keine Buchstaben gelegt!";render();return;}
-  S.busy=true;S.msg="Prüfe Wörter…";render();
   const empty=S.game.board.every(row=>row.every(c=>!c));
-  if(empty&&!S.placed.some(p=>p.r===7&&p.c===7)){S.msg="Erster Zug muss ★ bedecken!";S.busy=false;render();return;}
+  if(empty&&!S.placed.some(p=>p.r===7&&p.c===7)){S.msg="Erster Zug muss ★ bedecken!";render();return;}
   const rs=new Set(S.placed.map(p=>p.r)),cs=new Set(S.placed.map(p=>p.c));
-  if(rs.size>1&&cs.size>1){S.msg="Buchstaben in einer Linie!";S.busy=false;render();return;}
+  if(rs.size>1&&cs.size>1){S.msg="Buchstaben in einer Linie!";render();return;}
   const words=getWords(S.game.board,S.placed);
-  if(!words.length){S.msg="Keine Wörter gebildet!";S.busy=false;render();return;}
-  for(const{w}of words){if(!await checkWord(w)){S.msg=`"${w}" kein deutsches Wort ✗`;S.busy=false;render();return;}}
+  if(!words.length){S.msg="Keine Wörter gebildet!";render();return;}
   const pts=calcScore(S.game.board,S.placed);
   const nb=S.game.board.map(r=>[...r]);
   S.placed.forEach(({r,c,l})=>{nb[r][c]=l;});
